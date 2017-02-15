@@ -42,12 +42,8 @@ func (j *Journal) Update(us []Update) error {
 		}
 		buf = append(buf, `{"p":"`...)
 		buf = append(buf, u.Path...)
-		if u.Value == nil {
-			buf = append(buf, `","d":true`...)
-		} else {
-			buf = append(buf, `","v":`...)
-			buf = append(buf, *u.Value...)
-		}
+		buf = append(buf, `","v":`...)
+		buf = append(buf, *u.Value...)
 		buf = append(buf, '}')
 	}
 	buf = append(buf, ']', '\n')
@@ -114,11 +110,13 @@ func OpenJournal(filename string, obj interface{}) (*Journal, error) {
 		return nil, err
 	}
 	// decode each set of updates
-	// TODO: handle corrupted file (probably want to return an error)
 	for {
 		var set []Update
 		if err = dec.Decode(&set); err == io.EOF {
 			break
+		} else if _, ok := err.(*json.SyntaxError); ok {
+			// skip malformed update sets
+			continue
 		} else if err != nil {
 			return nil, err
 		}
@@ -154,51 +152,35 @@ func OpenJournal(filename string, obj interface{}) (*Journal, error) {
 //
 //    foo.bars.0.baz
 //
-// The path is accompanied by either a new object or a deletion flag. Thus, to
-// increment the value "3" in the above object, we would use the following
-// Update:
+// The path is accompanied by a new object. Thus, to increment the value "3"
+// in the above object, we would use the following Update:
 //
 //    {
 //        "p": "foo.bars.0.baz",
 //        "v": 4
 //    }
 //
-// Whereas to delete it, we would use:
-//
-//    {
-//        "p": "foo.bars.0.baz",
-//        "d": true
-//    }
+// Note that if the path is "", the entire object is replaced.
 //
 // All permutations of the Update object are legal. However, malformed updates
-// are ignored during application. An update is considered malformed in three
+// are ignored during application. An Update is considered malformed in three
 // circumstances:
 //
 // - Its Path references an element that does not exist at application time.
 //   This includes out-of-bounds array indices.
 // - Its Path contains invalid characters (e.g. "). See the JSON spec.
-// - Delete is false, but Value is empty.
-// - Delete is true, but Path is empty.
-// - Value contains invalid JSON.
-//
-// Other special cases are handled as follows:
-//
-// - If Delete is false and Path is empty, the entire object is replace with Value.
-// - If Delete is true and Value is not empty, Delete takes priority.
+// - Value contains invalid JSON or is empty.
 //
 // Finally, to enable efficient array updates, the string "append" may be used
 // as a special array index. When this index is the last accessor in Path,
-// Value will be appended to the end of the array. "append" introduces two
-// more circumstances where an update is considered malformed (and thus
+// Value will be appended to the end of the array. "append" introduces one
+// more circumstance where an update is considered malformed (and thus
 // ignored):
 //
 // - "append" is used as an index in a non-terminal array accessor
-// - "append" is used and Delete is true
 type Update struct {
 	// Path is an arbitrarily-nested JSON element, such as foo.bars.1.baz
 	Path string `json:"p"`
-	// Delete indicates whether Path should be removed.
-	Delete bool `json:"d,omitempty"`
 	// Value contains the new value of Path.
 	// TODO: remove pointer once Go 1.8 is released.
 	Value *json.RawMessage `json:"v,omitempty"`
@@ -208,12 +190,8 @@ func (u Update) MarshalJSON() ([]byte, error) {
 	j := make([]byte, 0, 128) // reasonable guess; avoids GC if we're lucky
 	j = append(j, `{"p":"`...)
 	j = append(j, u.Path...)
-	if u.Value == nil {
-		j = append(j, `","d":true`...)
-	} else {
-		j = append(j, `","v":`...)
-		j = append(j, *u.Value...)
-	}
+	j = append(j, `","v":`...)
+	j = append(j, *u.Value...)
 	j = append(j, '}')
 	return j, nil
 }
@@ -223,42 +201,33 @@ func (u Update) MarshalJSON() ([]byte, error) {
 // Update docstring for an explanation of malformed Updates.
 func (u Update) apply(obj json.RawMessage) json.RawMessage {
 	// special cases
-	if !u.Delete && len(*u.Value) == 0 {
+	if len(*u.Value) == 0 {
 		return obj
 	} else if u.Path == "" {
 		return *u.Value
 	}
-
-	if u.Delete {
-		return deletePath(obj, u.Path)
-	}
 	return modifyPath(obj, u.Path, *u.Value)
 }
 
-// NewUpdate constructs an update using the provided path and val. If val is
-// nil, the Update is a delete. If val cannot be marshaled, NewUpdate panics.
-// If val implements the json.Marshaler interface, it is called directly. Note
-// that this bypasses validation of the produced JSON, which may result in a
-// malformed Update.
+// NewUpdate constructs an update using the provided path and val. If val
+// cannot be marshaled, NewUpdate panics. If val implements the json.Marshaler
+// interface, it is called directly. Note that this bypasses validation of the
+// produced JSON, which may result in a malformed Update.
 func NewUpdate(path string, val interface{}) Update {
-	u := Update{
-		Path:   path,
-		Delete: val == nil,
+	var data []byte
+	var err error
+	if m, ok := val.(json.Marshaler); ok {
+		// bypass validation
+		data, err = m.MarshalJSON()
+	} else {
+		data, err = json.Marshal(val)
 	}
-	if val != nil {
-		var data []byte
-		var err error
-		if m, ok := val.(json.Marshaler); ok {
-			// bypass validation
-			data, err = m.MarshalJSON()
-		} else {
-			data, err = json.Marshal(val)
-		}
-		if err != nil {
-			panic(err)
-		}
-		rm := json.RawMessage(data)
-		u.Value = &rm
+	if err != nil {
+		panic(err)
 	}
-	return u
+	rm := json.RawMessage(data)
+	return Update{
+		Path:  path,
+		Value: &rm,
+	}
 }
