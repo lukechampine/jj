@@ -171,19 +171,17 @@ func OpenJournal(filename string, obj interface{}) (*Journal, error) {
 // - Its Path contains invalid characters (e.g. "). See the JSON spec.
 // - Value contains invalid JSON or is empty.
 //
-// Finally, to enable efficient array updates, the string "append" may be used
-// as a special array index. When this index is the last accessor in Path,
-// Value will be appended to the end of the array. "append" introduces one
-// more circumstance where an update is considered malformed (and thus
-// ignored):
-//
-// - "append" is used as an index in a non-terminal array accessor
+// Finally, to enable efficient array updates, the length of the array (at
+// application time) may be used as a special array index.  When this index is
+// the last accessor in Path, Value will be appended to the end of the array.
+// If the index is not the last accessor, the Update is considered malformed
+// (and thus is ignored).
 type Update struct {
 	// Path is an arbitrarily-nested JSON element, such as foo.bars.1.baz
 	Path string `json:"p"`
 	// Value contains the new value of Path.
 	// TODO: remove pointer once Go 1.8 is released.
-	Value *json.RawMessage `json:"v,omitempty"`
+	Value *json.RawMessage `json:"v"`
 }
 
 func (u Update) MarshalJSON() ([]byte, error) {
