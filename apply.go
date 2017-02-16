@@ -14,28 +14,37 @@ func modifyPath(json []byte, path string, val []byte) []byte {
 		return val
 	}
 
-	// parse path
-	accs := strings.Split(path, ".")
-
-	// locate old value
+	var lastAcc string
 	var i int
-	for n, acc := range accs {
-		off := locateAccessor(json[i:], acc)
-		if off == -1 {
+	for j := 0; lastAcc == ""; j++ {
+		// determine next accessor by seeking to .
+		dotIndex := strings.IndexByte(path[j:], '.')
+		if dotIndex == -1 {
+			// not found; this is the last accessor
+			dotIndex = len(path[j:])
+			lastAcc = path[j:]
+		}
+		acc := path[j : j+dotIndex]
+		j += dotIndex
+
+		// seek to accessor
+		accIndex := locateAccessor(json[i:], acc)
+		if accIndex == -1 {
 			// not found; return unmodified
 			return json
-		} else if json[off] == ']' && n != len(accs)-1 {
-			// only the last accessor may using the "append" index
+		} else if json[accIndex] == ']' && lastAcc == "" {
+			// only the last accessor may use the "append" index
 			return json
 		}
-		i += off
+		i += accIndex
 	}
+
 	// replace old value
-	var newJSON []byte
+	newJSON := make([]byte, 0, len(json)+len(val)) // reasonable guess
 	newJSON = append(newJSON, json[:i]...)
 	if json[i] == ']' {
 		// we are appending. If the array is not empty, insert an extra ,
-		if accs[len(accs)-1] != "0" {
+		if lastAcc != "0" {
 			newJSON = append(newJSON, ',')
 		}
 	}
@@ -63,11 +72,11 @@ func locateAccessor(json []byte, acc string) int {
 		json = consumeSeparator(json) // consume {
 		// iterate through keys, searching for acc
 		for json[0] != '}' {
-			var key string
+			var key []byte
 			key, json = parseString(json)
 			json = consumeWhitespace(json)
 			json = consumeSeparator(json) // consume :
-			if key == acc {
+			if bytes.Equal(key, []byte(acc)) {
 				// acc found
 				return origLen - len(json)
 			}
@@ -107,14 +116,19 @@ func locateAccessor(json []byte, acc string) int {
 	}
 }
 
-func parseString(json []byte) (string, []byte) {
+func parseString(json []byte) ([]byte, []byte) {
 	after := consumeString(json)
 	strLen := len(json) - len(after) - 2
-	return string(json[1 : 1+strLen]), after
+	return json[1 : 1+strLen], after
 }
 
 func consumeWhitespace(json []byte) []byte {
-	return bytes.TrimLeft(json, " \t\n\r")
+	for i := range json {
+		if c := json[i]; c > ' ' || (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+			return json[i:]
+		}
+	}
+	return json[len(json):]
 }
 
 func consumeSeparator(json []byte) []byte {

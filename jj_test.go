@@ -124,7 +124,7 @@ func TestParseString(t *testing.T) {
 		{`"foo\\\"bar":"baz"`, `foo\\\"bar`, `:"baz"`},
 	}
 	for _, test := range tests {
-		if str, rest := parseString([]byte(test.json)); str != test.str || string(rest) != test.rest {
+		if str, rest := parseString([]byte(test.json)); string(str) != test.str || string(rest) != test.rest {
 			t.Errorf("parseString('%s'): expected (%q, '%s'), got (%q, '%s')", test.json, test.str, test.rest, str, rest)
 		}
 	}
