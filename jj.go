@@ -123,7 +123,8 @@ func OpenJournal(filename string, obj interface{}) (*Journal, error) {
 	// decode each set of updates
 	for {
 		var set []Update
-		if err = dec.Decode(&set); err == io.EOF {
+		if err = dec.Decode(&set); err == io.EOF || err == io.ErrUnexpectedEOF {
+			// unexpected EOF means the last update was corrupted
 			break
 		} else if _, ok := err.(*json.SyntaxError); ok {
 			// skip malformed update sets

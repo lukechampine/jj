@@ -72,6 +72,32 @@ func TestJournal(t *testing.T) {
 	}
 }
 
+func TestJournalMalformed(t *testing.T) {
+	f, cleanup := tempFile(t, "TestJournalMalformed")
+	defer cleanup()
+
+	// write a partially-malformed log
+	f.WriteString(`{"foo": 3}
+[{"p": "foo", "v": 4}]
+[{"p": "foo", "v": 5}`)
+	f.Close()
+
+	// load log into foo
+	var foo struct {
+		Foo int `json:"foo"`
+	}
+	j, err := OpenJournal(f.Name(), &foo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Close()
+
+	// the last update set should have been discarded
+	if foo.Foo != 4 {
+		t.Fatal("log was not applied correctly:", foo.Foo)
+	}
+}
+
 func TestRewritePath(t *testing.T) {
 	tests := []struct {
 		json string
