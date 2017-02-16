@@ -1,0 +1,461 @@
+package jj
+
+import (
+	"io/ioutil"
+	"os"
+	"testing"
+)
+
+func tempFile(t interface {
+	Fatal(...interface{})
+}, name string) (*os.File, func()) {
+	f, err := ioutil.TempFile("", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f, func() {
+		f.Close()
+		os.RemoveAll(f.Name())
+	}
+}
+
+func BenchmarkNewUpdate(b *testing.B) {
+	u := NewUpdate("foo.bar", struct{ X, Y int }{3, 4})
+
+	bb, _ := u.MarshalJSON()
+	b.SetBytes(int64(len(bb)))
+	for i := 0; i < b.N; i++ {
+		u.MarshalJSON()
+	}
+}
+
+func TestModifyPath(t *testing.T) {
+	tests := []struct {
+		json string
+		path string
+		val  string
+		exp  string
+	}{
+		{``, ``, ``, ``},
+		{`"foo"`, ``, ``, ``},
+		{``, `foo`, ``, ``},
+		{``, ``, `"foo"`, `"foo"`},
+		{`"foo"`, ``, `"bar"`, `"bar"`},
+		// object
+		{`{"foo":"bar"}`, `bar`, `"baz"`, `{"foo":"bar"}`},
+		{`{"foo":"bar"}`, `foo`, `"baz"`, `{"foo":"baz"}`},
+		{`{"foo":"bar", "bar":"baz"}`, `bar`, `"quux"`, `{"foo":"bar", "bar":"quux"}`},
+		{`{"foo": {"bar": "baz"}}`, `foo.bar`, `"quux"`, `{"foo": {"bar": "quux"}}`},
+		// array
+		{`[]`, `foo`, `"bar"`, `[]`},
+		{`[1]`, `0`, `"bar"`, `["bar"]`},
+		{`[1, 2]`, `0`, `"bar"`, `["bar", 2]`},
+		{`[1, 2]`, `1`, `"bar"`, `[1, "bar"]`},
+		{`[]`, `0`, `"bar"`, `["bar"]`},
+		{`[1]`, `1`, `"bar"`, `[1,"bar"]`},
+		{`["foo", "bar"]`, `2`, `"baz"`, `["foo", "bar","baz"]`},
+	}
+	for _, test := range tests {
+		if res := modifyPath([]byte(test.json), test.path, []byte(test.val)); string(res) != test.exp {
+			t.Errorf("modifyPath('%s', %q, '%s'): expected '%s', got '%s'", test.json, test.path, test.val, test.exp, res)
+		}
+	}
+}
+
+func BenchmarkModifyPath(b *testing.B) {
+	u := NewUpdate("foo.bar.baz", "quux")
+	json := []byte(`{"foo": {"bar": {"baz": ""}}}`)
+	for i := 0; i < b.N; i++ {
+		u.apply(json)
+	}
+}
+
+func TestLocateAccessor(t *testing.T) {
+	tests := []struct {
+		json string
+		acc  string
+		loc  int
+	}{
+		// object
+		{`{}`, `foo`, -1},
+		{`{"foo":0}`, `foo`, 7},
+		{`{"foo":0}`, `bar`, -1},
+		{`{"foo":0}3`, `foo`, 7},
+		{`{"foo":0} 3`, `foo`, 7},
+		{`{"foo":0,"bar":7}`, `bar`, len(`{"foo":0,"bar":`)},
+		{`{"foo":0 , "bar":7}`, `bar`, len(`{"foo":0 , "bar":`)},
+		{`{"foo":0,"bar":7}3`, `bar`, len(`{"foo":0,"bar":`)},
+		{`{"foo":0,"bar":7} 3`, `bar`, len(`{"foo":0,"bar":`)},
+		// array
+		{`[1,2,3]`, `0`, 1},
+		{`[1,2,3]`, `1`, 3},
+		{`[1,2,3]`, `2`, 5},
+		{`[1,2,3]`, `3`, 6}, // special case
+		{`[1,2,3]`, `4`, -1},
+		{`[1,2,3]`, `foo`, -1},
+		{`[]`, `0`, 1},
+		{`[]`, `1`, -1},
+		// string
+		{`"foo"`, `foo`, -1},
+		{`"{\"foo\": 3}"`, `foo`, -1},
+		// number
+		{`3`, `foo`, -1},
+		{`3`, `3`, -1},
+	}
+	for _, test := range tests {
+		if loc := locateAccessor([]byte(test.json), test.acc); loc != test.loc {
+			t.Errorf("locateAccessor('%s', %q): expected %v, got %v", test.json, test.acc, test.loc, loc)
+		}
+	}
+}
+
+func TestParseString(t *testing.T) {
+	tests := []struct {
+		json string
+		str  string
+		rest string
+	}{
+		{`""`, ``, ``},
+		{`"foo"`, `foo`, ``},
+		{`"foo":"bar"`, `foo`, `:"bar"`},
+		{`"foo" : "bar"`, `foo`, ` : "bar"`},
+		{`"foo\"bar"`, `foo\"bar`, ``},
+		{`"foo\"bar":"baz"`, `foo\"bar`, `:"baz"`},
+		{`"foo\\\"bar":"baz"`, `foo\\\"bar`, `:"baz"`},
+	}
+	for _, test := range tests {
+		if str, rest := parseString([]byte(test.json)); str != test.str || string(rest) != test.rest {
+			t.Errorf("parseString('%s'): expected (%q, '%s'), got (%q, '%s')", test.json, test.str, test.rest, str, rest)
+		}
+	}
+}
+
+func TestConsumeWhitespace(t *testing.T) {
+	tests := []struct {
+		json string
+		rest string
+	}{
+		{" ", ``},
+		{" 3", `3`},
+		{"\t", ``},
+		{"\t3", `3`},
+		{"\n", ``},
+		{"\n3", `3`},
+		{"\r", ``},
+		{"\r3", `3`},
+		{" \t\n\r", ``},
+		{" \t\n\r3", `3`},
+	}
+	for _, test := range tests {
+		if rest := consumeWhitespace([]byte(test.json)); string(rest) != test.rest {
+			t.Errorf("consumeWhitespace('%s'): expected '%s', got '%s'", test.json, test.rest, rest)
+		}
+	}
+}
+
+func TestConsumeSeparator(t *testing.T) {
+	tests := []struct {
+		json string
+		rest string
+	}{
+		{"[", ``},
+		{"[ \r\n\t", ``},
+		{"[3", `3`},
+		{"[ \r\n\t3", `3`},
+		{"{", ``},
+		{"{ \r\n\t", ``},
+		{"{3", `3`},
+		{"{ \r\n\t3", `3`},
+		{"}", ``},
+		{"} \r\n\t", ``},
+		{"}3", `3`},
+		{"} \r\n\t3", `3`},
+		{"]", ``},
+		{"] \r\n\t", ``},
+		{"]3", `3`},
+		{"] \r\n\t3", `3`},
+		{":", ``},
+		{": \r\n\t", ``},
+		{":3", `3`},
+		{": \r\n\t3", `3`},
+		{",", ``},
+		{", \r\n\t", ``},
+		{",3", `3`},
+		{", \r\n\t3", `3`},
+	}
+	for _, test := range tests {
+		if rest := consumeSeparator([]byte(test.json)); string(rest) != test.rest {
+			t.Errorf("consumeSeparator('%s'): expected '%s', got '%s'", test.json, test.rest, rest)
+		}
+	}
+}
+
+func TestConsumeValue(t *testing.T) {
+	tests := []struct {
+		json string
+		rest string
+	}{
+		// object
+		{`{}`, ``},
+		{`{}3`, `3`},
+		{`{} 3`, ` 3`},
+		{`{"foo":0}`, ``},
+		{`{"foo":0}3`, `3`},
+		{`{"foo":0} 3`, ` 3`},
+		{`{"foo":0,"bar":7}`, ``},
+		{`{"foo":0,"bar":7}3`, `3`},
+		{`{"foo":0,"bar":7} 3`, ` 3`},
+		{`{"foo":0 , "bar":7}`, ``},
+		{`{"foo":0 , "bar":7}3`, `3`},
+		{`{"foo":0 , "bar":7} 3`, ` 3`},
+		{`{"":""}`, ``},
+		{`{"":""}3`, `3`},
+		{`{"":""} 3`, ` 3`},
+		{`{"}":"}"}`, ``},
+		{`{"}":"}"}3`, `3`},
+		{`{"}":"}"} 3`, ` 3`},
+		{`{"":{}}`, ``},
+		{`{"":{}}3`, `3`},
+		{`{"":{}} 3`, ` 3`},
+		{`{"}":["}{"]}`, ``},
+		{`{"}":["}{"]}3`, `3`},
+		{`{"}":["}{"]} 3`, ` 3`},
+		{`{"":{"":{"":{}}}}`, ``},
+		{`{"":{"":{"":{}}}}3`, `3`},
+		{`{"":{"":{"":{}}}} 3`, ` 3`},
+		// array
+		{`[]`, ``},
+		{`[]3`, `3`},
+		{`[] 3`, ` 3`},
+		{`[0]`, ``},
+		{`[0]3`, `3`},
+		{`[0] 3`, ` 3`},
+		{`[0,1]`, ``},
+		{`[0,1]3`, `3`},
+		{`[0,1] 3`, ` 3`},
+		{`[0 , 1]`, ``},
+		{`[0 , 1]3`, `3`},
+		{`[0 , 1] 3`, ` 3`},
+		{`["", ""]`, ``},
+		{`["", ""]3`, `3`},
+		{`["", ""] 3`, ` 3`},
+		{`[[], []]`, ``},
+		{`[[], []]3`, `3`},
+		{`[[], []] 3`, ` 3`},
+		{`["[", "]"]`, ``},
+		{`["[", "]"]3`, `3`},
+		{`["[", "]"] 3`, ` 3`},
+		{`[["]", "]"], [{"foo":[]}]]`, ``},
+		{`[["]", "]"], [{"foo":[]}]]3`, `3`},
+		{`[["]", "]"], [{"foo":[]}]] 3`, ` 3`},
+		// string
+		{`""`, ``},
+		{`"foo"`, ``},
+		{`"foo":"bar"`, `:"bar"`},
+		{`"foo" : "bar"`, ` : "bar"`},
+		{`"foo\"bar"`, ``},
+		{`"foo\"bar":"baz"`, `:"baz"`},
+		// true, false, null
+		{`true`, ``},
+		{`false`, ``},
+		{`null`, ``},
+		{`true3`, `3`},
+		{`false3`, `3`},
+		{`null3`, `3`},
+		{`true 3`, ` 3`},
+		{`false 3`, ` 3`},
+		{`null 3`, ` 3`},
+		// number
+		{`-0`, ``},
+		{`-0 true`, ` true`},
+		{`0`, ``},
+		{`0 true`, ` true`},
+		{`0.0`, ``},
+		{`0.0 true`, ` true`},
+		{`1.0`, ``},
+		{`1.0 true`, ` true`},
+		{`10`, ``},
+		{`10 true`, ` true`},
+		{`10.1`, ``},
+		{`10.1 true`, ` true`},
+		{`1e7`, ``},
+		{`1e7 true`, ` true`},
+		{`1e+7`, ``},
+		{`1e+7 true`, ` true`},
+		{`1e-7`, ``},
+		{`1e-7 true`, ` true`},
+		{`1.0e7`, ``},
+		{`1.0e7 true`, ` true`},
+		{`1.0e+7`, ``},
+		{`1.0e+7 true`, ` true`},
+		{`1.0e-7`, ``},
+		{`1.0e-7 true`, ` true`},
+		{`10.1e7`, ``},
+		{`10.1e7 true`, ` true`},
+		{`10.1e+7`, ``},
+		{`10.1e+7 true`, ` true`},
+		{`10.1e-7`, ``},
+		{`10.1e-7 true`, ` true`},
+	}
+	for _, test := range tests {
+		if rest := consumeValue([]byte(test.json)); string(rest) != test.rest {
+			t.Errorf("consumeValue('%s'): expected '%s', got '%s'", test.json, test.rest, rest)
+		}
+	}
+}
+
+func TestConsumeObject(t *testing.T) {
+	tests := []struct {
+		json string
+		rest string
+	}{
+		{`{}`, ``},
+		{`{}3`, `3`},
+		{`{} 3`, ` 3`},
+		{`{"foo":0}`, ``},
+		{`{"foo":0}3`, `3`},
+		{`{"foo":0} 3`, ` 3`},
+		{`{"foo":0,"bar":7}`, ``},
+		{`{"foo":0,"bar":7}3`, `3`},
+		{`{"foo":0,"bar":7} 3`, ` 3`},
+		{`{"foo":0 , "bar":7}`, ``},
+		{`{"foo":0 , "bar":7}3`, `3`},
+		{`{"foo":0 , "bar":7} 3`, ` 3`},
+		{`{"":""}`, ``},
+		{`{"":""}3`, `3`},
+		{`{"":""} 3`, ` 3`},
+		{`{"}":"}"}`, ``},
+		{`{"}":"}"}3`, `3`},
+		{`{"}":"}"} 3`, ` 3`},
+		{`{"":{}}`, ``},
+		{`{"":{}}3`, `3`},
+		{`{"":{}} 3`, ` 3`},
+		{`{"}":["}{"]}`, ``},
+		{`{"}":["}{"]}3`, `3`},
+		{`{"}":["}{"]} 3`, ` 3`},
+		{`{"":{"":{"":{}}}}`, ``},
+		{`{"":{"":{"":{}}}}3`, `3`},
+		{`{"":{"":{"":{}}}} 3`, ` 3`},
+	}
+	for _, test := range tests {
+		if rest := consumeObject([]byte(test.json)); string(rest) != test.rest {
+			t.Errorf("consumeObject('%s'): expected '%s', got '%s'", test.json, test.rest, rest)
+		}
+	}
+}
+
+func TestConsumeArray(t *testing.T) {
+	tests := []struct {
+		json string
+		rest string
+	}{
+		{`[]`, ``},
+		{`[]3`, `3`},
+		{`[] 3`, ` 3`},
+		{`[0]`, ``},
+		{`[0]3`, `3`},
+		{`[0] 3`, ` 3`},
+		{`[0,1]`, ``},
+		{`[0,1]3`, `3`},
+		{`[0,1] 3`, ` 3`},
+		{`[0 , 1]`, ``},
+		{`[0 , 1]3`, `3`},
+		{`[0 , 1] 3`, ` 3`},
+		{`["", ""]`, ``},
+		{`["", ""]3`, `3`},
+		{`["", ""] 3`, ` 3`},
+		{`[[], []]`, ``},
+		{`[[], []]3`, `3`},
+		{`[[], []] 3`, ` 3`},
+		{`["[", "]"]`, ``},
+		{`["[", "]"]3`, `3`},
+		{`["[", "]"] 3`, ` 3`},
+		{`[["]", "]"], [{"foo":[]}]]`, ``},
+		{`[["]", "]"], [{"foo":[]}]]3`, `3`},
+		{`[["]", "]"], [{"foo":[]}]] 3`, ` 3`},
+	}
+	for _, test := range tests {
+		if rest := consumeArray([]byte(test.json)); string(rest) != test.rest {
+			t.Errorf("consumeArray('%s'): expected '%s', got '%s'", test.json, test.rest, rest)
+		}
+	}
+}
+
+func TestConsumeString(t *testing.T) {
+	tests := []struct {
+		json string
+		rest string
+	}{
+		{`""`, ``},
+		{`"foo"`, ``},
+		{`"foo":"bar"`, `:"bar"`},
+		{`"foo" : "bar"`, ` : "bar"`},
+		{`"foo\"bar"`, ``},
+		{`"foo\"bar":"baz"`, `:"baz"`},
+	}
+	for _, test := range tests {
+		if rest := consumeString([]byte(test.json)); string(rest) != test.rest {
+			t.Errorf("consumeString('%s'): expected '%s', got '%s'", test.json, test.rest, rest)
+		}
+	}
+}
+
+func TestConsumeNumber(t *testing.T) {
+	tests := []struct {
+		json string
+		rest string
+	}{
+		{`-0`, ``},
+		{`-0 true`, ` true`},
+		{`0`, ``},
+		{`0 true`, ` true`},
+		{`0.0`, ``},
+		{`0.0 true`, ` true`},
+		{`1.0`, ``},
+		{`1.0 true`, ` true`},
+		{`10`, ``},
+		{`10 true`, ` true`},
+		{`10.1`, ``},
+		{`10.1 true`, ` true`},
+		{`1e7`, ``},
+		{`1e7 true`, ` true`},
+		{`1e+7`, ``},
+		{`1e+7 true`, ` true`},
+		{`1e-7`, ``},
+		{`1e-7 true`, ` true`},
+		{`1.0e7`, ``},
+		{`1.0e7 true`, ` true`},
+		{`1.0e+7`, ``},
+		{`1.0e+7 true`, ` true`},
+		{`1.0e-7`, ``},
+		{`1.0e-7 true`, ` true`},
+		{`10.1e7`, ``},
+		{`10.1e7 true`, ` true`},
+		{`10.1e+7`, ``},
+		{`10.1e+7 true`, ` true`},
+		{`10.1e-7`, ``},
+		{`10.1e-7 true`, ` true`},
+	}
+	for _, test := range tests {
+		if rest := consumeNumber([]byte(test.json)); string(rest) != test.rest {
+			t.Errorf("consumeNumber('%s'): expected '%s', got '%s'", test.json, test.rest, rest)
+		}
+	}
+}
+
+func BenchmarkUpdateJournal(b *testing.B) {
+	f, cleanup := tempFile(b, "BenchmarkUpdateJournal")
+	defer cleanup()
+
+	j := &Journal{f: f}
+	us := []Update{
+		NewUpdate("foo.bar", struct{ X, Y int }{3, 4}),
+		NewUpdate("foo.bar", nil),
+	}
+
+	for i := 0; i < b.N; i++ {
+		if err := j.Update(us); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

@@ -198,14 +198,13 @@ func (u Update) MarshalJSON() ([]byte, error) {
 }
 
 // apply applies u to obj, returning the new JSON, which may share underlying
-// memory with obj. If u is malformed, obj is returned unaltered. See the
-// Update docstring for an explanation of malformed Updates.
+// memory with obj or u.Value. If u is malformed, obj is returned unaltered.
+// See the Update docstring for an explanation of malformed Updates. If obj is
+// not valid JSON, the result is undefined.
 func (u Update) apply(obj json.RawMessage) json.RawMessage {
-	// special cases
 	if len(*u.Value) == 0 {
+		// u is malformed
 		return obj
-	} else if u.Path == "" {
-		return *u.Value
 	}
 	return modifyPath(obj, u.Path, *u.Value)
 }
