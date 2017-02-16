@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-// modifyPath replaces the value at path in json with val. The returned slice
+// rewritePath replaces the value at path in json with val. The returned slice
 // may share underlying memory with json. If path is malformed, the original
 // json is returned.
-func modifyPath(json []byte, path string, val []byte) []byte {
+func rewritePath(json []byte, path string, val []byte) []byte {
 	if path == "" {
 		return val
 	}

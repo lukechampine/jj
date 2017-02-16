@@ -206,7 +206,7 @@ func (u Update) apply(obj json.RawMessage) json.RawMessage {
 		// u is malformed
 		return obj
 	}
-	return modifyPath(obj, u.Path, *u.Value)
+	return rewritePath(obj, u.Path, *u.Value)
 }
 
 // NewUpdate constructs an update using the provided path and val. If val

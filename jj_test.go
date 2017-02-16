@@ -19,17 +19,7 @@ func tempFile(t interface {
 	}
 }
 
-func BenchmarkNewUpdate(b *testing.B) {
-	u := NewUpdate("foo.bar", struct{ X, Y int }{3, 4})
-
-	bb, _ := u.MarshalJSON()
-	b.SetBytes(int64(len(bb)))
-	for i := 0; i < b.N; i++ {
-		u.MarshalJSON()
-	}
-}
-
-func TestModifyPath(t *testing.T) {
+func TestRewritePath(t *testing.T) {
 	tests := []struct {
 		json string
 		path string
@@ -54,19 +44,25 @@ func TestModifyPath(t *testing.T) {
 		{`[]`, `0`, `"bar"`, `["bar"]`},
 		{`[1]`, `1`, `"bar"`, `[1,"bar"]`},
 		{`["foo", "bar"]`, `2`, `"baz"`, `["foo", "bar","baz"]`},
+		{`[[1,2], [3,4]]`, `1.0`, `"baz"`, `[[1,2], ["baz",4]]`},
+		{`[[1,2], [3,4]]`, `1.2`, `"baz"`, `[[1,2], [3,4,"baz"]]`},
+		{`[[1,2], [3,4]]`, `2.0`, `"baz"`, `[[1,2], [3,4]]`},
+		{`[[1,2], [3,4]]`, `2`, `"baz"`, `[[1,2], [3,4],"baz"]`},
+		// array in object
+		{`{"foo": [1,2]}`, `foo.0`, `"bar"`, `{"foo": ["bar",2]}`},
+		{`{"foo": [1,2]}`, `foo.2`, `"bar"`, `{"foo": [1,2,"bar"]}`},
+		{`{"foo": [1,2]}`, `bar.2`, `"bar"`, `{"foo": [1,2]}`},
+		// object in array
+		{`[{"foo": "bar"}]`, `0.foo`, `"baz"`, `[{"foo": "baz"}]`},
+		{`[{}, {"foo": "bar"}]`, `1.foo`, `"baz"`, `[{}, {"foo": "baz"}]`},
+		{`[{"foo": "bar"}]`, `1.foo`, `"baz"`, `[{"foo": "bar"}]`},
+		// monster
+		{`{"foo": [{}, {"bar": [{"baz":""}]}}]`, `foo.1.bar.0.baz`, `"quux"`, `{"foo": [{}, {"bar": [{"baz":"quux"}]}}]`},
 	}
 	for _, test := range tests {
-		if res := modifyPath([]byte(test.json), test.path, []byte(test.val)); string(res) != test.exp {
-			t.Errorf("modifyPath('%s', %q, '%s'): expected '%s', got '%s'", test.json, test.path, test.val, test.exp, res)
+		if res := rewritePath([]byte(test.json), test.path, []byte(test.val)); string(res) != test.exp {
+			t.Errorf("rewritePath('%s', %q, '%s'): expected '%s', got '%s'", test.json, test.path, test.val, test.exp, res)
 		}
-	}
-}
-
-func BenchmarkModifyPath(b *testing.B) {
-	u := NewUpdate("foo.bar.baz", "quux")
-	json := []byte(`{"foo": {"bar": {"baz": ""}}}`)
-	for i := 0; i < b.N; i++ {
-		u.apply(json)
 	}
 }
 
@@ -457,5 +453,22 @@ func BenchmarkUpdateJournal(b *testing.B) {
 		if err := j.Update(us); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkNewUpdate(b *testing.B) {
+	u := NewUpdate("foo.bar", struct{ X, Y int }{3, 4})
+	bb, _ := u.MarshalJSON()
+	b.SetBytes(int64(len(bb)))
+	for i := 0; i < b.N; i++ {
+		u.MarshalJSON()
+	}
+}
+
+func BenchmarkApply(b *testing.B) {
+	u := NewUpdate("foo.bar.baz", "")
+	json := []byte(`{"foo": {"bar": {"baz": "quux"}}}`)
+	for i := 0; i < b.N; i++ {
+		u.apply(json)
 	}
 }
