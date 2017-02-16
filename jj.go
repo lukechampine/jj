@@ -70,9 +70,6 @@ func (j *Journal) Checkpoint(obj interface{}) error {
 	if err := json.NewEncoder(tmp).Encode(obj); err != nil {
 		return err
 	}
-	if _, err := tmp.Write([]byte{'\n'}); err != nil {
-		return err
-	}
 	if err := tmp.Sync(); err != nil {
 		return err
 	}
