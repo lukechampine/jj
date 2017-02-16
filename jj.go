@@ -92,12 +92,26 @@ func (j *Journal) Close() error {
 }
 
 // OpenJournal opens the supplied Journal and decodes the reconstructed object
-// into obj, which must be a pointer.
+// into obj. If the Journal does not exist, it will be created and obj will be
+// used as the initial object.
 func OpenJournal(filename string, obj interface{}) (*Journal, error) {
 	// open file handle, creating the file if it does not exist
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		return nil, err
+	}
+	// if file was newly created, use obj as the initial object.
+	if stat, err := f.Stat(); err != nil {
+		return nil, err
+	} else if stat.Size() == 0 {
+		j := &Journal{
+			f:        f,
+			filename: filename,
+		}
+		if err := j.Checkpoint(obj); err != nil {
+			return nil, err
+		}
+		return j, nil
 	}
 
 	// decode the initial object
