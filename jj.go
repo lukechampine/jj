@@ -198,16 +198,6 @@ type Update struct {
 	Value *json.RawMessage `json:"v"`
 }
 
-func (u Update) MarshalJSON() ([]byte, error) {
-	j := make([]byte, 0, 128) // reasonable guess; avoids GC if we're lucky
-	j = append(j, `{"p":"`...)
-	j = append(j, u.Path...)
-	j = append(j, `","v":`...)
-	j = append(j, *u.Value...)
-	j = append(j, '}')
-	return j, nil
-}
-
 // apply applies u to obj, returning the new JSON, which may share underlying
 // memory with obj or u.Value. If u is malformed, obj is returned unaltered.
 // See the Update docstring for an explanation of malformed Updates. If obj is

@@ -509,15 +509,6 @@ func BenchmarkUpdateJournal(b *testing.B) {
 	}
 }
 
-func BenchmarkNewUpdate(b *testing.B) {
-	u := NewUpdate("foo.bar", struct{ X, Y int }{3, 4})
-	bb, _ := u.MarshalJSON()
-	b.SetBytes(int64(len(bb)))
-	for i := 0; i < b.N; i++ {
-		u.MarshalJSON()
-	}
-}
-
 func BenchmarkApply(b *testing.B) {
 	u := NewUpdate("foo.bar.baz", "")
 	json := []byte(`{"foo": {"bar": {"baz": "quux"}}}`)
