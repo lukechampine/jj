@@ -43,7 +43,7 @@ func (j *Journal) Update(us []Update) error {
 		buf = append(buf, `{"p":"`...)
 		buf = append(buf, u.Path...)
 		buf = append(buf, `","v":`...)
-		buf = append(buf, *u.Value...)
+		buf = append(buf, u.Value...)
 		buf = append(buf, '}')
 	}
 	buf = append(buf, ']', '\n')
@@ -195,8 +195,7 @@ type Update struct {
 	// Path is an arbitrarily-nested JSON element, such as foo.bars.1.baz
 	Path string `json:"p"`
 	// Value contains the new value of Path.
-	// TODO: remove pointer once Go 1.8 is released.
-	Value *json.RawMessage `json:"v"`
+	Value json.RawMessage `json:"v"`
 }
 
 // apply applies u to obj, returning the new JSON, which may share underlying
@@ -204,11 +203,11 @@ type Update struct {
 // See the Update docstring for an explanation of malformed Updates. If obj is
 // not valid JSON, the result is undefined.
 func (u Update) apply(obj json.RawMessage) json.RawMessage {
-	if len(*u.Value) == 0 {
+	if len(u.Value) == 0 {
 		// u is malformed
 		return obj
 	}
-	return rewritePath(obj, u.Path, *u.Value)
+	return rewritePath(obj, u.Path, u.Value)
 }
 
 // NewUpdate constructs an update using the provided path and val. If val
@@ -227,9 +226,8 @@ func NewUpdate(path string, val interface{}) Update {
 	if err != nil {
 		panic(err)
 	}
-	rm := json.RawMessage(data)
 	return Update{
 		Path:  path,
-		Value: &rm,
+		Value: json.RawMessage(data),
 	}
 }
