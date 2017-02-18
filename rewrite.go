@@ -200,7 +200,7 @@ func consumeArray(json []byte) []byte {
 
 func consumeString(json []byte) []byte {
 	i := 1 // consume "
-	// seek forward until we find a " without a preceeding \
+	// seek forward until we find a " without a preceding \
 	i += bytes.IndexByte(json[i:], '"')
 	for json[i-1] == '\\' {
 		i++
@@ -214,20 +214,14 @@ func consumeNumber(json []byte) []byte {
 		json = json[1:]
 	}
 	// leading digits
-	for '0' <= json[0] && json[0] <= '9' {
-		json = json[1:]
-		if len(json) == 0 {
-			return json
-		}
+	if json = consumeDigits(json); len(json) == 0 {
+		return json
 	}
 	// decimal digits
 	if json[0] == '.' {
 		json = json[1:]
-		for '0' <= json[0] && json[0] <= '9' {
-			json = json[1:]
-			if len(json) == 0 {
-				return json
-			}
+		if json = consumeDigits(json); len(json) == 0 {
+			return json
 		}
 	}
 	// exponent
@@ -236,12 +230,17 @@ func consumeNumber(json []byte) []byte {
 		if json[0] == '+' || json[0] == '-' {
 			json = json[1:]
 		}
-		for '0' <= json[0] && json[0] <= '9' {
-			json = json[1:]
-			if len(json) == 0 {
-				return json
-			}
-		}
+		return consumeDigits(json)
 	}
 	return json
+}
+
+func consumeDigits(json []byte) []byte {
+	var i int
+	for i = 0; i < len(json); i++ {
+		if json[i] < '0' || '9' < json[i] {
+			break
+		}
+	}
+	return json[i:]
 }
