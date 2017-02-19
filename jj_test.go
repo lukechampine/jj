@@ -46,7 +46,7 @@ func TestJournal(t *testing.T) {
 		Y []bar `json:"y"`
 	}
 
-	j, cleanup := tempJournal(t, foo{Y: []bar{}}, "TestJournal")
+	j, cleanup := tempJournal(t, foo{}, "TestJournal")
 	defer cleanup()
 
 	us := []Update{
@@ -136,6 +136,10 @@ func TestRewritePath(t *testing.T) {
 		{`[{"foo": "bar"}]`, `0.foo`, `"baz"`, `[{"foo": "baz"}]`},
 		{`[{}, {"foo": "bar"}]`, `1.foo`, `"baz"`, `[{}, {"foo": "baz"}]`},
 		{`[{"foo": "bar"}]`, `1.foo`, `"baz"`, `[{"foo": "bar"}]`},
+		// null
+		{`null`, `foo`, `"bar"`, `null`},
+		{`null`, `0`, `"bar"`, `["bar"]`},
+		{`{"foo": null}`, `foo.0`, `"bar"`, `{"foo": ["bar"]}`},
 		// monster
 		{`{"foo": [{}, {"bar": [{"baz":""}]}}]`, `foo.1.bar.0.baz`, `"quux"`, `{"foo": [{}, {"bar": [{"baz":"quux"}]}}]`},
 	}
@@ -171,6 +175,9 @@ func TestLocateAccessor(t *testing.T) {
 		{`[1,2,3]`, `foo`, -1},
 		{`[]`, `0`, 1},
 		{`[]`, `1`, -1},
+		// null
+		{`null`, `0`, 3}, // special case
+		{`null`, `1`, -1},
 		// string
 		{`"foo"`, `foo`, -1},
 		{`"{\"foo\": 3}"`, `foo`, -1},

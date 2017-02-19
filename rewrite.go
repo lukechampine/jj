@@ -32,8 +32,8 @@ func rewritePath(json []byte, path string, val []byte) []byte {
 		if accIndex == -1 {
 			// not found; return unmodified
 			return json
-		} else if (json[accIndex] == ']' || json[accIndex] == '}') && lastAcc == "" {
-			// only the last accessor may use the "append" index
+		} else if (json[accIndex] == ']' || json[accIndex] == '}' || json[accIndex] == 'l') && lastAcc == "" {
+			// only the last accessor may append
 			return json
 		}
 		i += accIndex
@@ -41,15 +41,13 @@ func rewritePath(json []byte, path string, val []byte) []byte {
 
 	// replace old value
 	newJSON := make([]byte, 0, len(json)+len(val)+len(lastAcc)) // reasonable guess
-	newJSON = append(newJSON, json[:i]...)
-	if json[i] == ']' {
-		// we are appending
-		if prevChar(json, i) != '[' {
-			// if the array is not empty, insert an extra ,
-			newJSON = append(newJSON, ',')
-		}
-	} else if json[i] == '}' {
-		// we are inserting a new key
+	switch json[i] {
+	default:
+		newJSON = append(newJSON, json[:i]...)
+		newJSON = append(newJSON, val...)
+
+	case '}': // insert a new key
+		newJSON = append(newJSON, json[:i]...)
 		if prevChar(json, i) != '{' {
 			// if the object is not empty, insert an extra ,
 			newJSON = append(newJSON, ',')
@@ -58,10 +56,24 @@ func rewritePath(json []byte, path string, val []byte) []byte {
 		newJSON = append(newJSON, '"')
 		newJSON = append(newJSON, lastAcc...)
 		newJSON = append(newJSON, '"', ':')
-	}
-	newJSON = append(newJSON, val...)
-	newJSON = append(newJSON, consumeValue(json[i:])...)
+		newJSON = append(newJSON, val...)
 
+	case ']': // append to an array
+		newJSON = append(newJSON, json[:i]...)
+		if prevChar(json, i) != '[' {
+			// if the array is not empty, insert an extra ,
+			newJSON = append(newJSON, ',')
+		}
+		newJSON = append(newJSON, val...)
+
+	case 'l': // replace null with a single-element array
+		newJSON = append(newJSON, json[:i-3]...)
+		newJSON = append(newJSON, '[')
+		newJSON = append(newJSON, val...)
+		newJSON = append(newJSON, ']')
+		i -= 3 // backtrack to beginning of null value
+	}
+	newJSON = append(newJSON, consumeValue(json[i:])...)
 	return newJSON
 }
 
@@ -74,7 +86,8 @@ func locateAccessor(json []byte, acc string) int {
 	}
 
 	// acc must refer to either an object key or an array index. So if we
-	// don't see a { or [, the path is invalid.
+	// don't see a { or [, the path is invalid. We also allow a special case
+	// for null -- it is treated as the empty array [].
 	switch json[0] {
 	default:
 		return -1
@@ -123,6 +136,15 @@ func locateAccessor(json []byte, acc string) int {
 			// operation is desired; we return the offset of the closing ].
 			return -1
 		}
+		return origLen - len(json)
+
+	case 'n': // null -- interpreted as []
+		// acc must be 0 to append to null
+		if n, err := strconv.Atoi(acc); err != nil || n != 0 {
+			return -1
+		}
+		// return the offset of l
+		json = json[3:]
 		return origLen - len(json)
 	}
 }
