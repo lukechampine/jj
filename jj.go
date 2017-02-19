@@ -176,15 +176,15 @@ func OpenJournal(filename string, obj interface{}) (*Journal, error) {
 // are ignored during application. An Update is considered malformed in three
 // circumstances:
 //
-// - Its Path references an element that does not exist at application time.
-//   This includes out-of-bounds array indices.
-// - Its Path contains invalid characters (e.g. "). See the JSON spec.
-// - Value contains invalid JSON or is empty.
+//    - Its Path references an element that does not exist at application time.
+//      This includes out-of-bounds array indices.
+//    - Its Path contains invalid characters (e.g. "). See the JSON spec.
+//    - Value contains invalid JSON or is empty.
 //
 // Other special cases are handled as follows:
 //
-// - If Path is "", the entire object is replaced.
-// - If an object contains duplicate keys, the first key encountered is used.
+//    - If Path is "", the entire object is replaced.
+//    - If an object contains duplicate keys, the first key encountered is used.
 //
 // Finally, to enable efficient array updates, the length of the array (at
 // application time) may be used as a special array index.  When this index is

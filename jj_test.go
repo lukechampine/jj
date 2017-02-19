@@ -111,10 +111,11 @@ func TestRewritePath(t *testing.T) {
 		{``, ``, `"foo"`, `"foo"`},
 		{`"foo"`, ``, `"bar"`, `"bar"`},
 		// object
-		{`{"foo":"bar"}`, `bar`, `"baz"`, `{"foo":"bar"}`},
 		{`{"foo":"bar"}`, `foo`, `"baz"`, `{"foo":"baz"}`},
 		{`{"foo":"bar", "bar":"baz"}`, `bar`, `"quux"`, `{"foo":"bar", "bar":"quux"}`},
 		{`{"foo": {"bar": "baz"}}`, `foo.bar`, `"quux"`, `{"foo": {"bar": "quux"}}`},
+		{`{"foo":"bar"}`, `bar`, `"baz"`, `{"foo":"bar","bar":"baz"}`},
+		{`{"foo": {}}`, `foo.bar`, `"baz"`, `{"foo": {"bar":"baz"}}`},
 		// array
 		{`[]`, `foo`, `"bar"`, `[]`},
 		{`[1]`, `0`, `"bar"`, `["bar"]`},
@@ -154,7 +155,7 @@ func TestLocateAccessor(t *testing.T) {
 		// object
 		{`{}`, `foo`, -1},
 		{`{"foo":0}`, `foo`, 7},
-		{`{"foo":0}`, `bar`, -1},
+		{`{"foo":0}`, `bar`, 8}, // special case
 		{`{"foo":0}3`, `foo`, 7},
 		{`{"foo":0} 3`, `foo`, 7},
 		{`{"foo":0,"bar":7}`, `bar`, len(`{"foo":0,"bar":`)},
@@ -224,6 +225,36 @@ func TestConsumeWhitespace(t *testing.T) {
 	for _, test := range tests {
 		if rest := consumeWhitespace([]byte(test.json)); string(rest) != test.rest {
 			t.Errorf("consumeWhitespace('%s'): expected '%s', got '%s'", test.json, test.rest, rest)
+		}
+	}
+}
+
+func TestPrevChar(t *testing.T) {
+	tests := []struct {
+		json  string
+		index int
+		char  byte
+	}{
+		{" ", 0, ' '},
+		{" 3", 1, '3'},
+		{"\t", 0, '\t'},
+		{"\t3", 1, '3'},
+		{"\n", 0, '\n'},
+		{"\n3", 1, '3'},
+		{"\r", 0, '\r'},
+		{"\r3", 1, '3'},
+		{" \t\n\r", 3, '\r'},
+		{" \t\n\r3", 4, '3'},
+		{"[]", 1, '['},
+		{" ]", 1, ']'},
+		{"[1]", 2, '1'},
+		{"{}", 1, '{'},
+		{" }", 1, '}'},
+		{`{"foo"}`, 6, '"'},
+	}
+	for _, test := range tests {
+		if char := prevChar([]byte(test.json), test.index); char != test.char {
+			t.Errorf("prevChar(%q, %d): expected %q, got %q", test.json, test.index, test.char, char)
 		}
 	}
 }

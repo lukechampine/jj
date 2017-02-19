@@ -32,7 +32,7 @@ func rewritePath(json []byte, path string, val []byte) []byte {
 		if accIndex == -1 {
 			// not found; return unmodified
 			return json
-		} else if json[accIndex] == ']' && lastAcc == "" {
+		} else if (json[accIndex] == ']' || json[accIndex] == '}') && lastAcc == "" {
 			// only the last accessor may use the "append" index
 			return json
 		}
@@ -40,13 +40,24 @@ func rewritePath(json []byte, path string, val []byte) []byte {
 	}
 
 	// replace old value
-	newJSON := make([]byte, 0, len(json)+len(val)) // reasonable guess
+	newJSON := make([]byte, 0, len(json)+len(val)+len(lastAcc)) // reasonable guess
 	newJSON = append(newJSON, json[:i]...)
 	if json[i] == ']' {
-		// we are appending. If the array is not empty, insert an extra ,
-		if lastAcc != "0" {
+		// we are appending
+		if prevChar(json, i) != '[' {
+			// if the array is not empty, insert an extra ,
 			newJSON = append(newJSON, ',')
 		}
+	} else if json[i] == '}' {
+		// we are inserting a new key
+		if prevChar(json, i) != '{' {
+			// if the object is not empty, insert an extra ,
+			newJSON = append(newJSON, ',')
+		}
+		// insert key
+		newJSON = append(newJSON, '"')
+		newJSON = append(newJSON, lastAcc...)
+		newJSON = append(newJSON, '"', ':')
 	}
 	newJSON = append(newJSON, val...)
 	newJSON = append(newJSON, consumeValue(json[i:])...)
@@ -86,8 +97,8 @@ func locateAccessor(json []byte, acc string) int {
 				json = consumeSeparator(json) // consume ,
 			}
 		}
-		// acc not found
-		return -1
+		// acc not found; return the offset of the closing }
+		return origLen - len(json)
 
 	case '[': // array
 		// is accessor possibly an array index?
@@ -129,6 +140,16 @@ func consumeWhitespace(json []byte) []byte {
 		}
 	}
 	return json[len(json):]
+}
+
+func prevChar(json []byte, i int) byte {
+	// seek backwards from i until we hit a non-whitespace char
+	for j := i - 1; j >= 0; j-- {
+		if c := json[j]; c > ' ' || (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+			return json[j]
+		}
+	}
+	return json[i]
 }
 
 func consumeSeparator(json []byte) []byte {
