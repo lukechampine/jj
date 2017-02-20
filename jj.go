@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+
+	"github.com/lukechampine/mjson"
 )
 
 // A Journal is a log of updates to a JSON object.
@@ -207,7 +209,7 @@ func (u Update) apply(obj json.RawMessage) json.RawMessage {
 		// u is malformed
 		return obj
 	}
-	return rewritePath(obj, u.Path, u.Value)
+	return mjson.SetRawInPlace(obj, u.Path, u.Value)
 }
 
 // NewUpdate constructs an update using the provided path and val. If val
